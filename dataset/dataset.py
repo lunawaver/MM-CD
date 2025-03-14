@@ -7,21 +7,16 @@ from PIL import Image
 from transformers import AutoImageProcessor, BertTokenizer
 import config.config as cfg
 
-# 创建一个Dataset类,用于处理图片数据, 使其符合ConvNeXT模型的输入要求, 该类继承自torch.utils.data.Dataset
 class MultiModel_Dataset(torch.utils.data.Dataset):
-    # 构造函数, 传入图片文件夹的路径
     def __init__(self, image_root_folder, report_csv_file, answer1_csv_file, answer2_csv_file, answer3_csv_file):
         self.images = PreProcessDataset(image_root_folder, report_csv_file, answer1_csv_file, answer2_csv_file, answer3_csv_file)
 
-    # 实现__len__方法, 返回数据集的大小
     def __len__(self):
         return len(self.images)
 
-    # 实现__getitem__方法, 传入索引, 返回对应索引的数据
     def __getitem__(self, idx):
         return self.images[idx]
 
-# 创建DataLoader, 用于加载上述的DataSet
 class MultiModel_DataLoader():
     def __init__(self, dataset, batch_size, shuffle):
         self.dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, pin_memory=True)
@@ -35,26 +30,19 @@ class MultiModel_DataLoader():
 def PreProcessDataset(image_root_folder, report_csv_file, answer1_csv_file, answer2_csv_file, answer3_csv_file):
     preprocessor = AutoImageProcessor.from_pretrained(cfg.ConvNeXT_NAME)
 
-    # 打开report_csv_file文件, 读取其中的内容
     reports_csv_file = pd.read_csv(report_csv_file)
 
-    # 打开answer1_csv_file文件, 读取其中的内容
     answer1_csv_file = pd.read_csv(answer1_csv_file)
 
-    # 打开answer2_csv_file文件, 读取其中的内容
     answer2_csv_file = pd.read_csv(answer2_csv_file)
 
-    # 打开answer3_csv_file文件, 读取其中的内容
     answer3_csv_file = pd.read_csv(answer3_csv_file)
 
-    # 打开image_root_folder文件夹，获取该文件夹内的所有子文件夹名称，并保存至patient_image_folders内。
     patient_image_folders = os.listdir(image_root_folder)
 
     datas = []
 
     for patient_image_folder in tqdm(patient_image_folders):
-        # 读取&处理image
-        # 打开patient_image_folder文件夹，获取该文件夹内的所有以jpg结尾的图像文件的名称，并保存至patient_image_files内。
         patient_images = glob.glob(os.path.join(image_root_folder, patient_image_folder, '*.jpg'))
         patient_images.sort(key=lambda x: int(x.split('/')[-1].split('.')[0]))
 
@@ -66,10 +54,8 @@ def PreProcessDataset(image_root_folder, report_csv_file, answer1_csv_file, answ
             images.append(image)
         images = torch.stack(images)[:len(images)]
 
-        # 读取&处理report
         report = PreProcessReport(reports_csv_file, patient_image_folder)
 
-        # 读取&处理answer
         answers = PreProcessAnswer(answer1_csv_file, answer2_csv_file, answer3_csv_file, patient_image_folder)
 
         valid_img_num_file = os.path.join(image_root_folder, patient_image_folder, 'valid_img_num.txt')
@@ -83,7 +69,6 @@ def PreProcessDataset(image_root_folder, report_csv_file, answer1_csv_file, answ
 def PreProcessReport(report_csv_file, patient_id):
     tokenizer = BertTokenizer.from_pretrained(cfg.Bert_NAME)
 
-    # 在reports中的第一列中寻找与patient_image_folder相同的行，将其对应的第二列内容作为报告
     report = report_csv_file[report_csv_file.iloc[:, 0] == patient_id].iloc[:, 1].values[0]
 
     report_max_len = cfg.Report_Max_Length
@@ -91,7 +76,6 @@ def PreProcessReport(report_csv_file, patient_id):
     answer_max_len = cfg.Answer_Max_Length
     pad_len = cfg.Pad_Length
 
-    # 读取text_csv_file的第二列作为报告
     question1 = "问题：脑内多发哪些病灶，或无病灶"
     question2 = "问题：是否存在脑白质脱髓鞘？"
     question3 = "问题：对明显的异常表现进行详细描述。"
@@ -109,7 +93,6 @@ def PreProcessReport(report_csv_file, patient_id):
                       [0] * pad_len)
     token_type_ids = torch.tensor(token_type_ids)
 
-    # report中有些word在str的len的计算中的结果与tokenized_report的shape不一致, 所以这里使用tokenized_report.shape[0]来计算report的有效长度
     report_valid_len = tokenized_report.shape[0]
     question1_valid_len = len(question1_seq) - 5
     question2_valid_len = len(question2_seq) - 5
@@ -133,13 +116,12 @@ def PreProcessReport(report_csv_file, patient_id):
                 question3_seq + answer_seq)
 
     input_ids = tokenizer(full_text, return_tensors='pt', max_length=cfg.Bert_Max_Length, truncation=True, padding='max_length')['input_ids'].squeeze()
-    
+
     report_obj = {"input_ids": input_ids, "token_type_ids": token_type_ids, "attention_mask": attention_mask}
 
     return report_obj
 
 def PreProcessAnswer(answer1_csv_file, answer2_csv_file, answer3_csv_file, patient_id):
-    # 在answer1_csv_file中的第一列中寻找与patient_id相同的行，将该行的从第2列开始的所有内容作为answer1
     answer1 = torch.tensor(answer1_csv_file[answer1_csv_file.iloc[:, 0] == patient_id].iloc[:, 1:].values[0], dtype=torch.long)
     answer2 = torch.tensor(answer2_csv_file[answer2_csv_file.iloc[:, 0] == patient_id].iloc[:, 1:].values[0], dtype=torch.long)
     answer3 = torch.tensor(answer3_csv_file[answer3_csv_file.iloc[:, 0] == patient_id].iloc[:, 1:].values[0], dtype=torch.long)
